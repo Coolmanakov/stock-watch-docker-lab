@@ -1,0 +1,67 @@
+name: stock-watch
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [lab-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  backend:
+    build: ./backend
+    environment:
+      DB_HOST: db
+      DB_NAME: stockwatch
+      DB_USER: lab
+      DB_PASSWORD: ${DB_PASSWORD:-local_lab_password}
+      SERVICE_URL: http://web-service:8001
+    depends_on:
+      db:
+        condition: service_healthy
+      web-service:
+        condition: service_healthy
+    networks: [lab-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: stockwatch
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-local_lab_password}
+    volumes:
+      - stock-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks: [lab-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+  web-service:
+    build: ./web-service
+    networks: [lab-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  stock-data:
+networks:
+  lab-net:
+    driver: bridge
